@@ -266,8 +266,9 @@ class Projection(utils.SaveLoad):
             return
         if self.m != other.m:
             raise ValueError(
-                "vector space mismatch: update is using %s features, expected %s" % (other.m, self.m)
+                f"vector space mismatch: update is using {other.m} features, expected {self.m}"
             )
+
         logger.info("merging projections: %s + %s", str(self.u.shape), str(other.u.shape))
         m, n1, n2 = self.u.shape[0], self.u.shape[1], other.u.shape[1]
         # TODO Maybe keep the bases as elementary reflectors, without
@@ -403,10 +404,9 @@ class LsiModel(interfaces.TransformationABC, basemodel.BaseTopicModel):
         self.num_topics = int(num_topics)
         self.chunksize = int(chunksize)
         self.decay = float(decay)
-        if distributed:
-            if not onepass:
-                logger.warning("forcing the one-pass algorithm for distributed LSA")
-                onepass = True
+        if distributed and not onepass:
+            logger.warning("forcing the one-pass algorithm for distributed LSA")
+            onepass = True
         self.onepass = onepass
         self.extra_samples, self.power_iters = extra_samples, power_iters
         self.dtype = dtype
@@ -454,7 +454,7 @@ class LsiModel(interfaces.TransformationABC, basemodel.BaseTopicModel):
             except Exception as err:
                 # distributed version was specifically requested, so this is an error state
                 logger.error("failed to initialize distributed LSI (%s)", err)
-                raise RuntimeError("failed to initialize distributed LSI (%s)" % err)
+                raise RuntimeError(f"failed to initialize distributed LSI ({err})")
 
         if corpus is not None:
             start = time.time()
@@ -492,64 +492,7 @@ class LsiModel(interfaces.TransformationABC, basemodel.BaseTopicModel):
             decay = self.decay
         if is_empty(corpus):
             logger.warning('LsiModel.add_documents() called but no documents provided, is this intended?')
-        if not scipy.sparse.issparse(corpus):
-            if not self.onepass:
-                # we are allowed multiple passes over the input => use a faster, randomized two-pass algo
-                update = Projection(
-                    self.num_terms, self.num_topics, None,
-                    dtype=self.dtype, random_seed=self.random_seed,
-                )
-                update.u, update.s = stochastic_svd(
-                    corpus, self.num_topics,
-                    num_terms=self.num_terms, chunksize=chunksize,
-                    extra_dims=self.extra_samples, power_iters=self.power_iters, dtype=self.dtype,
-                    random_seed=self.random_seed,
-                )
-                self.projection.merge(update, decay=decay)
-                self.docs_processed += len(corpus) if hasattr(corpus, '__len__') else 0
-            else:
-                # the one-pass algo
-                doc_no = 0
-                if self.dispatcher:
-                    logger.info('initializing %s workers', self.numworkers)
-                    self.dispatcher.reset()
-                for chunk_no, chunk in enumerate(utils.grouper(corpus, chunksize)):
-                    logger.info("preparing a new chunk of documents")
-                    nnz = sum(len(doc) for doc in chunk)
-                    # construct the job as a sparse matrix, to minimize memory overhead
-                    # definitely avoid materializing it as a dense matrix!
-                    logger.debug("converting corpus to csc format")
-                    job = matutils.corpus2csc(
-                        chunk, num_docs=len(chunk), num_terms=self.num_terms,
-                        num_nnz=nnz, dtype=self.dtype,
-                    )
-                    del chunk
-                    doc_no += job.shape[1]
-                    if self.dispatcher:
-                        # distributed version: add this job to the job queue, so workers can work on it
-                        logger.debug("creating job #%i", chunk_no)
-                        # put job into queue; this will eventually block, because the queue has a small finite size
-                        self.dispatcher.putjob(job)
-                        del job
-                        logger.info("dispatched documents up to #%s", doc_no)
-                    else:
-                        # serial version, there is only one "worker" (myself) => process the job directly
-                        update = Projection(
-                            self.num_terms, self.num_topics, job, extra_dims=self.extra_samples,
-                            power_iters=self.power_iters, dtype=self.dtype, random_seed=self.random_seed,
-                        )
-                        del job
-                        self.projection.merge(update, decay=decay)
-                        del update
-                        logger.info("processed documents up to #%s", doc_no)
-                        self.print_topics(5)
-
-                # wait for all workers to finish (distributed version only)
-                if self.dispatcher:
-                    logger.info("reached the end of input; now waiting for all remaining jobs to finish")
-                    self.projection = self.dispatcher.getstate()
-                self.docs_processed += doc_no
-        else:
+        if scipy.sparse.issparse(corpus):
             assert not self.dispatcher, "must be in serial mode to receive jobs"
             update = Projection(
                 self.num_terms, self.num_topics, corpus.tocsc(), extra_dims=self.extra_samples,
@@ -558,6 +501,63 @@ class LsiModel(interfaces.TransformationABC, basemodel.BaseTopicModel):
             self.projection.merge(update, decay=decay)
             logger.info("processed sparse job of %i documents", corpus.shape[1])
             self.docs_processed += corpus.shape[1]
+
+        elif not self.onepass:
+            # we are allowed multiple passes over the input => use a faster, randomized two-pass algo
+            update = Projection(
+                self.num_terms, self.num_topics, None,
+                dtype=self.dtype, random_seed=self.random_seed,
+            )
+            update.u, update.s = stochastic_svd(
+                corpus, self.num_topics,
+                num_terms=self.num_terms, chunksize=chunksize,
+                extra_dims=self.extra_samples, power_iters=self.power_iters, dtype=self.dtype,
+                random_seed=self.random_seed,
+            )
+            self.projection.merge(update, decay=decay)
+            self.docs_processed += len(corpus) if hasattr(corpus, '__len__') else 0
+        else:
+            # the one-pass algo
+            doc_no = 0
+            if self.dispatcher:
+                logger.info('initializing %s workers', self.numworkers)
+                self.dispatcher.reset()
+            for chunk_no, chunk in enumerate(utils.grouper(corpus, chunksize)):
+                logger.info("preparing a new chunk of documents")
+                nnz = sum(len(doc) for doc in chunk)
+                # construct the job as a sparse matrix, to minimize memory overhead
+                # definitely avoid materializing it as a dense matrix!
+                logger.debug("converting corpus to csc format")
+                job = matutils.corpus2csc(
+                    chunk, num_docs=len(chunk), num_terms=self.num_terms,
+                    num_nnz=nnz, dtype=self.dtype,
+                )
+                del chunk
+                doc_no += job.shape[1]
+                if self.dispatcher:
+                    # distributed version: add this job to the job queue, so workers can work on it
+                    logger.debug("creating job #%i", chunk_no)
+                    # put job into queue; this will eventually block, because the queue has a small finite size
+                    self.dispatcher.putjob(job)
+                    del job
+                    logger.info("dispatched documents up to #%s", doc_no)
+                else:
+                    # serial version, there is only one "worker" (myself) => process the job directly
+                    update = Projection(
+                        self.num_terms, self.num_topics, job, extra_dims=self.extra_samples,
+                        power_iters=self.power_iters, dtype=self.dtype, random_seed=self.random_seed,
+                    )
+                    del job
+                    self.projection.merge(update, decay=decay)
+                    del update
+                    logger.info("processed documents up to #%s", doc_no)
+                    self.print_topics(5)
+
+            # wait for all workers to finish (distributed version only)
+            if self.dispatcher:
+                logger.info("reached the end of input; now waiting for all remaining jobs to finish")
+                self.projection = self.dispatcher.getstate()
+            self.docs_processed += doc_no
 
     def __str__(self):
         """Get a human readable representation of model.
@@ -568,9 +568,7 @@ class LsiModel(interfaces.TransformationABC, basemodel.BaseTopicModel):
             A human readable string of the current objects parameters.
 
         """
-        return "%s<num_terms=%s, num_topics=%s, decay=%s, chunksize=%s>" % (
-            self.__class__.__name__, self.num_terms, self.num_topics, self.decay, self.chunksize
-        )
+        return f"{self.__class__.__name__}<num_terms={self.num_terms}, num_topics={self.num_topics}, decay={self.decay}, chunksize={self.chunksize}>"
 
     def __getitem__(self, bow, scaled=False, chunksize=512):
         """Get the latent representation for `bow`.
@@ -632,15 +630,11 @@ class LsiModel(interfaces.TransformationABC, basemodel.BaseTopicModel):
         if scaled:
             topic_dist = (1.0 / self.projection.s[:self.num_topics]) * topic_dist  # s^-1 * u^-1 * x
 
-        # convert a np array to gensim sparse vector = tuples of (feature_id, feature_weight),
-        # with no zero weights.
-        if not is_corpus:
-            # lsi[single_document]
-            result = matutils.full2sparse(topic_dist)
-        else:
-            # lsi[chunk of documents]
-            result = matutils.Dense2Corpus(topic_dist)
-        return result
+        return (
+            matutils.Dense2Corpus(topic_dist)
+            if is_corpus
+            else matutils.full2sparse(topic_dist)
+        )
 
     def get_topics(self):
         """Get the topic vectors.
@@ -820,7 +814,7 @@ class LsiModel(interfaces.TransformationABC, basemodel.BaseTopicModel):
             When methods are called on instance (should be called from class).
 
         """
-        kwargs['mmap'] = kwargs.get('mmap', None)
+        kwargs['mmap'] = kwargs.get('mmap')
         result = super(LsiModel, cls).load(fname, *args, **kwargs)
         projection_fname = utils.smart_extension(fname, '.projection')
         try:
@@ -866,11 +860,7 @@ def print_debug(id2token, u, s, topics, num_words=10, num_neg=None):
     for topic in sorted(result.keys()):
         weights = sorted(result[topic], key=lambda x: -abs(x[0]))
         _, most = weights[0]
-        if u[most, topic] < 0.0:  # the most significant word has a negative sign => flip sign of u[most]
-            normalize = -1.0
-        else:
-            normalize = 1.0
-
+        normalize = -1.0 if u[most, topic] < 0.0 else 1.0
         # order features according to salience; ignore near-zero entries in u
         pos, neg = [], []
         for weight, uvecno in weights:
@@ -941,10 +931,7 @@ def stochastic_svd(
 
     """
     rank = int(rank)
-    if extra_dims is None:
-        samples = max(10, 2 * rank)  # use more samples than requested factors, to improve accuracy
-    else:
-        samples = rank + int(extra_dims)
+    samples = max(10, 2 * rank) if extra_dims is None else rank + int(extra_dims)
     logger.info("using %i extra samples and %i power iterations", samples - rank, power_iters)
 
     num_terms = int(num_terms)
