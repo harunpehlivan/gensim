@@ -377,12 +377,10 @@ class PoincareModel(utils.SaveLoad):
                 return vectors / norm - (np.sign(vectors) * epsilon)
         else:
             norms = np.linalg.norm(vectors, axis=1)
-            if (norms < threshold).all():
-                return vectors
-            else:
+            if not (norms < threshold).all():
                 vectors[norms >= threshold] *= (threshold / norms[norms >= threshold])[:, np.newaxis]
                 vectors[norms >= threshold] -= np.sign(vectors[norms >= threshold]) * epsilon
-                return vectors
+            return vectors
 
     def save(self, *args, **kwargs):
         """Save complete model to disk, inherited from :class:`~gensim.utils.SaveLoad`.
@@ -517,8 +515,7 @@ class PoincareModel(utils.SaveLoad):
             Each inner list is a list of negative samples for a single node in the input list.
 
         """
-        all_indices = [self._sample_negatives(node) for node in nodes]
-        return all_indices
+        return [self._sample_negatives(node) for node in nodes]
 
     def _train_on_batch(self, relations, check_gradients=False):
         """Perform training for a single training batch.
@@ -1158,10 +1155,12 @@ class PoincareKeyedVectors(KeyedVectors):
             node_index = self.get_index(node_or_vector)
         else:
             node_index = None
-        if not topn:
-            closest_indices = matutils.argsort(all_distances)
-        else:
-            closest_indices = matutils.argsort(all_distances, topn=1 + topn)
+        closest_indices = (
+            matutils.argsort(all_distances, topn=1 + topn)
+            if topn
+            else matutils.argsort(all_distances)
+        )
+
         result = [
             (self.index_to_key[index], float(all_distances[index]))
             for index in closest_indices if (not node_index or index != node_index)  # ignore the input node
@@ -1500,7 +1499,7 @@ class ReconstructionEvaluation:
             item_term = self.embedding.index_to_key[item]
             item_distances = self.embedding.distances(item_term)
             positive_relation_ranks, avg_precision = \
-                self.get_positive_relation_ranks_and_avg_prec(item_distances, item_relations)
+                    self.get_positive_relation_ranks_and_avg_prec(item_distances, item_relations)
             ranks += positive_relation_ranks
             avg_precision_scores.append(avg_precision)
             if max_n is not None and i > max_n:
@@ -1611,7 +1610,7 @@ class LinkPredictionEvaluation:
             item_term = self.embedding.index_to_key[item]
             item_distances = self.embedding.distances(item_term)
             unknown_relation_ranks, avg_precision = \
-                self.get_unknown_relation_ranks_and_avg_prec(item_distances, unknown_relations, known_relations)
+                    self.get_unknown_relation_ranks_and_avg_prec(item_distances, unknown_relations, known_relations)
             ranks += unknown_relation_ranks
             avg_precision_scores.append(avg_precision)
             if max_n is not None and i > max_n:
@@ -1664,7 +1663,7 @@ class LexicalEntailmentEvaluation:
             word_1_terms = self.find_matching_terms(trie, term_1)
             word_2_terms = self.find_matching_terms(trie, term_2)
         except KeyError:
-            raise ValueError("No matching terms found for either %s or %s" % (term_1, term_2))
+            raise ValueError(f"No matching terms found for either {term_1} or {term_2}")
         min_distance = np.inf
         min_term_1, min_term_2 = None, None
         for term_1 in word_1_terms:
@@ -1695,9 +1694,8 @@ class LexicalEntailmentEvaluation:
             List of matching terms.
 
         """
-        matches = trie.items('%s.' % word)
-        matching_terms = [''.join(key_chars) for key_chars, value in matches]
-        return matching_terms
+        matches = trie.items(f'{word}.')
+        return [''.join(key_chars) for key_chars, value in matches]
 
     @staticmethod
     def create_vocab_trie(embedding):

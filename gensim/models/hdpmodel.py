@@ -89,7 +89,7 @@ def expect_log_sticks(sticks):
 
     n = len(sticks[0]) + 1
     Elogsticks = np.zeros(n)
-    Elogsticks[0: n - 1] = ElogW
+    Elogsticks[:n - 1] = ElogW
     Elogsticks[1:] = Elogsticks[1:] + np.cumsum(Elog1_W)
     return Elogsticks
 
@@ -536,7 +536,7 @@ class HdpModel(interfaces.TransformationABC, basemodel.BaseTopicModel):
 
         """
         # Find the unique words in this chunk...
-        unique_words = dict()
+        unique_words = {}
         word_list = []
         for doc in chunk:
             for word_id, _ in doc:
@@ -550,8 +550,8 @@ class HdpModel(interfaces.TransformationABC, basemodel.BaseTopicModel):
         rw = np.array([self.m_r[t] for t in self.m_timestamp[word_list]])
         self.m_lambda[:, word_list] *= np.exp(self.m_r[-1] - rw)
         self.m_Elogbeta[:, word_list] = \
-            psi(self.m_eta + self.m_lambda[:, word_list]) - \
-            psi(self.m_W * self.m_eta + self.m_lambda_sum[:, np.newaxis])
+                psi(self.m_eta + self.m_lambda[:, word_list]) - \
+                psi(self.m_W * self.m_eta + self.m_lambda_sum[:, np.newaxis])
 
         ss = SuffStats(self.m_T, wt, len(chunk))
 
@@ -625,23 +625,17 @@ class HdpModel(interfaces.TransformationABC, basemodel.BaseTopicModel):
             # var_phi
             if iter < 3:
                 var_phi = np.dot(phi.T, (Elogbeta_doc * doc_word_counts).T)
-                (log_var_phi, log_norm) = matutils.ret_log_normalize_vec(var_phi)
-                var_phi = np.exp(log_var_phi)
             else:
                 var_phi = np.dot(phi.T, (Elogbeta_doc * doc_word_counts).T) + Elogsticks_1st
-                (log_var_phi, log_norm) = matutils.ret_log_normalize_vec(var_phi)
-                var_phi = np.exp(log_var_phi)
-
+            (log_var_phi, log_norm) = matutils.ret_log_normalize_vec(var_phi)
+            var_phi = np.exp(log_var_phi)
             # phi
             if iter < 3:
                 phi = np.dot(var_phi, Elogbeta_doc).T
-                (log_phi, log_norm) = matutils.ret_log_normalize_vec(phi)
-                phi = np.exp(log_phi)
             else:
                 phi = np.dot(var_phi, Elogbeta_doc).T + Elogsticks_2nd  # noqa:F821
-                (log_phi, log_norm) = matutils.ret_log_normalize_vec(phi)
-                phi = np.exp(log_phi)
-
+            (log_phi, log_norm) = matutils.ret_log_normalize_vec(phi)
+            phi = np.exp(log_phi)
             # v
             phi_all = phi * np.array(doc_word_counts)[:, np.newaxis]
             v[0] = 1.0 + np.sum(phi_all[:, :self.m_K - 1], 0)
@@ -839,11 +833,8 @@ class HdpModel(interfaces.TransformationABC, basemodel.BaseTopicModel):
         if not self.outputdir:
             logger.error("cannot store topics without having specified an output directory")
 
-        if doc_count is None:
-            fname = 'final'
-        else:
-            fname = 'doc-%i' % doc_count
-        fname = '%s/%s.topics' % (self.outputdir, fname)
+        fname = 'final' if doc_count is None else 'doc-%i' % doc_count
+        fname = f'{self.outputdir}/{fname}.topics'
         logger.info("saving topics to %s", fname)
         betas = self.m_lambda + self.m_eta
         np.savetxt(fname, betas)
@@ -860,7 +851,7 @@ class HdpModel(interfaces.TransformationABC, basemodel.BaseTopicModel):
         if not self.outputdir:
             logger.error("cannot store options without having specified an output directory")
             return
-        fname = '%s/options.dat' % self.outputdir
+        fname = f'{self.outputdir}/options.dat'
         with utils.open(fname, 'wb') as fout:
             fout.write('tau: %s\n' % str(self.m_tau - 1))
             fout.write('chunksize: %s\n' % str(self.chunksize))
@@ -887,7 +878,7 @@ class HdpModel(interfaces.TransformationABC, basemodel.BaseTopicModel):
         sticks = self.m_var_sticks[0] / (self.m_var_sticks[0] + self.m_var_sticks[1])
         alpha = np.zeros(self.m_T)
         left = 1.0
-        for i in range(0, self.m_T - 1):
+        for i in range(self.m_T - 1):
             alpha[i] = sticks[i] * left
             left = left - alpha[i]
         alpha[self.m_T - 1] = left
@@ -984,7 +975,7 @@ class HdpTopicFormatter:
         if topic_data is not None:
             topics = topic_data
         elif topic_file is not None:
-            topics = np.loadtxt('%s' % topic_file)
+            topics = np.loadtxt(f'{topic_file}')
         else:
             raise ValueError('no topic data!')
 

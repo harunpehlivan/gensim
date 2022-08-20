@@ -47,7 +47,7 @@ for root, dirs, files in os.walk(os.path.join(curr_dir, 'gallery')):
             with open(source_path, 'rb') as fin:
                 actual_md5.update(fin.read())
 
-            md5_path = cache_path + '.md5'
+            md5_path = f'{cache_path}.md5'
             with open(md5_path) as fin:
                 expected_md5 = fin.read()
 

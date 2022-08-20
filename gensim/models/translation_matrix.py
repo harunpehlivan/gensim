@@ -122,9 +122,7 @@ class Space:
         self.index2word = index2word
 
         # build a dict to map word to index
-        self.word2index = {}
-        for idx, word in enumerate(self.index2word):
-            self.word2index[word] = idx
+        self.word2index = {word: idx for idx, word in enumerate(self.index2word)}
 
     @classmethod
     def build(cls, lang_vec, lexicon=None):
@@ -355,7 +353,7 @@ class TranslationMatrix(utils.SaveLoad):
 
         # Translate the words and for each word return the `topn` similar words
         translated_word = OrderedDict()
-        for idx, word in enumerate(source_words):
+        for word in source_words:
             translated_target_word = []
             # Search the most `topn` similar words
             for j in range(topn):

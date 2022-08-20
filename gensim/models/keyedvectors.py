@@ -1162,8 +1162,7 @@ class KeyedVectors(utils.SaveLoad):
         norm = np.linalg.norm(vector_1)
         all_norms = np.linalg.norm(vectors_all, axis=1)
         dot_products = dot(vectors_all, vector_1)
-        similarities = dot_products / (norm * all_norms)
-        return similarities
+        return dot_products / (norm * all_norms)
 
     def distances(self, word_or_vector, other_words=()):
         """Compute cosine distances from given word or vector to all words in `other_words`.
@@ -1351,7 +1350,7 @@ class KeyedVectors(utils.SaveLoad):
                         if case_insensitive:
                             a, b, c, expected = [word.upper() for word in line.split()]
                         else:
-                            a, b, c, expected = [word for word in line.split()]
+                            a, b, c, expected = list(line.split())
                     except ValueError:
                         logger.info("Skipping invalid line #%i in %s", line_no, analogies)
                         continue
@@ -1484,7 +1483,7 @@ class KeyedVectors(utils.SaveLoad):
                         if case_insensitive:
                             a, b, sim = [word.upper() for word in line.split(delimiter)]
                         else:
-                            a, b, sim = [word for word in line.split(delimiter)]
+                            a, b, sim = list(line.split(delimiter))
                         sim = float(sim)
                     except (ValueError, TypeError):
                         logger.info('Skipping invalid line #%d in %s', line_no, pairs)
@@ -1587,12 +1586,10 @@ class KeyedVectors(utils.SaveLoad):
             Relative cosine similarity between wa and wb.
 
         """
-        sims = self.similar_by_word(wa, topn)
-        if not sims:
+        if sims := self.similar_by_word(wa, topn):
+            return float(self.similarity(wa, wb)) / (sum(sim for _, sim in sims))
+        else:
             raise ValueError("Cannot calculate relative cosine similarity without any similar words.")
-        rcs = float(self.similarity(wa, wb)) / (sum(sim for _, sim in sims))
-
-        return rcs
 
     def save_word2vec_format(
             self, fname, fvocab=None, binary=False, total_vec=None, write_header=True,
@@ -1625,7 +1622,7 @@ class KeyedVectors(utils.SaveLoad):
         """
         if total_vec is None:
             total_vec = len(self.index_to_key)
-        mode = 'wb' if not append else 'ab'
+        mode = 'ab' if append else 'wb'
 
         if sort_attr in self.expandos:
             store_order_vocab_keys = sorted(self.key_to_index.keys(), key=lambda k: -self.get_vecattr(k, sort_attr))
@@ -1659,7 +1656,7 @@ class KeyedVectors(utils.SaveLoad):
             if i != val:
                 break
             index_id_count += 1
-        keys_to_write = itertools.chain(range(0, index_id_count), store_order_vocab_keys)
+        keys_to_write = itertools.chain(range(index_id_count), store_order_vocab_keys)
 
         # Store the actual vectors to the output file, in the order defined by sort_attr.
         with utils.open(fname, mode) as fout:
@@ -1752,7 +1749,7 @@ class KeyedVectors(utils.SaveLoad):
         with utils.open(fname, 'rb') as fin:
             header = utils.to_unicode(fin.readline(), encoding=encoding)
             vocab_size, vector_size = (int(x) for x in header.split())  # throws for invalid file format
-            if not vector_size == self.vector_size:
+            if vector_size != self.vector_size:
                 raise ValueError("incompatible vector size %d in file %s" % (vector_size, fname))
                 # TODO: maybe mismatched vectors still useful enough to merge (truncating/padding)?
             if binary:
@@ -1776,7 +1773,10 @@ class KeyedVectors(utils.SaveLoad):
                 for line_no, line in enumerate(fin):
                     parts = utils.to_unicode(line.rstrip(), encoding=encoding, errors=unicode_errors).split(" ")
                     if len(parts) != vector_size + 1:
-                        raise ValueError("invalid vector on line %s (is this really the text format?)" % line_no)
+                        raise ValueError(
+                            f"invalid vector on line {line_no} (is this really the text format?)"
+                        )
+
                     word, weights = parts[0], [REAL(x) for x in parts[1:]]
                     if word in self.key_to_index:
                         overlap_count += 1
@@ -1861,7 +1861,7 @@ class KeyedVectors(utils.SaveLoad):
             self.key_to_index[k] = true_index
         del self.expandos['offset']  # no longer needed
         if self.max_rawint > -1:
-            self.index_to_key = list(range(0, self.max_rawint + 1)) + self.offset2doctag
+            self.index_to_key = list(range(self.max_rawint + 1)) + self.offset2doctag
         else:
             self.index_to_key = self.offset2doctag
         self.vectors = self.vectors_docs
@@ -1897,7 +1897,7 @@ class CompatVocab:
 
     def __str__(self):
         vals = ['%s:%r' % (key, self.__dict__[key]) for key in sorted(self.__dict__) if not key.startswith('_')]
-        return "%s<%s>" % (self.__class__.__name__, ', '.join(vals))
+        return f"{self.__class__.__name__}<{', '.join(vals)}>"
 
 
 # compatibility alias, allowing older pickle-based `.save()`s to load
@@ -1970,7 +1970,7 @@ def _word2vec_read_binary(
 
 
 def _word2vec_read_text(fin, kv, counts, vocab_size, vector_size, datatype, unicode_errors, encoding):
-    for line_no in range(vocab_size):
+    for _ in range(vocab_size):
         line = fin.readline()
         if line == b'':
             raise EOFError("unexpected end of input; is count incorrect or file otherwise damaged?")

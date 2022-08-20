@@ -160,7 +160,13 @@ def _remove_from_all_sets(label, clusters):
 
 def _contains_isolated_cores(label, cluster, min_cores):
     """Check if the cluster has at least ``min_cores`` of cores that belong to no other cluster."""
-    return sum([neighboring_labels == {label} for neighboring_labels in cluster.neighboring_labels]) >= min_cores
+    return (
+        sum(
+            neighboring_labels == {label}
+            for neighboring_labels in cluster.neighboring_labels
+        )
+        >= min_cores
+    )
 
 
 def _aggregate_topics(grouped_by_labels):
@@ -677,7 +683,10 @@ class EnsembleLda(SaveLoad):
         if "corpus" not in gensim_kw_args:
             gensim_kw_args["corpus"] = None
 
-        if gensim_kw_args["id2word"] is None and not gensim_kw_args["corpus"] is None:
+        if (
+            gensim_kw_args["id2word"] is None
+            and gensim_kw_args["corpus"] is not None
+        ):
             logger.warning("no word id mapping provided; initializing from corpus, assuming identity")
             gensim_kw_args["id2word"] = utils.dict_from_corpus(gensim_kw_args["corpus"])
         if gensim_kw_args["id2word"] is None and gensim_kw_args["corpus"] is None:
@@ -811,7 +820,11 @@ class EnsembleLda(SaveLoad):
         sstats_sum = self.sstats_sum
         # if sstats_sum (which is the number of words actually) should be wrong for some fantastic funny reason
         # that makes you want to peel your skin off, recreate it (takes a while):
-        if sstats_sum == 0 and "corpus" in self.gensim_kw_args and not self.gensim_kw_args["corpus"] is None:
+        if (
+            sstats_sum == 0
+            and "corpus" in self.gensim_kw_args
+            and self.gensim_kw_args["corpus"] is not None
+        ):
             for document in self.gensim_kw_args["corpus"]:
                 for token in document:
                     sstats_sum += token[1]
@@ -935,28 +948,25 @@ class EnsembleLda(SaveLoad):
             target = np.array(target)
             assert len(target) > 0
 
+        ttda = []
+
         if self.memory_friendly_ttda:
             # for memory friendly models/ttdas, append the ttdas to itself
 
             detected_num_models = 0
-            ttda = []
-
             # 1. ttda array, because that's the only accepted input that contains numbers
             if isinstance(target.dtype.type(), (np.number, float)):
                 ttda = target
                 detected_num_models = 1
 
-            # 2. list of ensemblelda objects
             elif isinstance(target[0], type(self)):
                 ttda = np.concatenate([ensemble.ttda for ensemble in target], axis=0)
-                detected_num_models = sum([ensemble.num_models for ensemble in target])
+                detected_num_models = sum(ensemble.num_models for ensemble in target)
 
-            # 3. list of gensim models
             elif isinstance(target[0], basemodel.BaseTopicModel):
                 ttda = np.concatenate([model.get_topics() for model in target], axis=0)
                 detected_num_models = len(target)
 
-            # unknown
             else:
                 raise ValueError(f"target is of unknown type or a list of unknown types: {type(target[0])}")
 
@@ -968,8 +978,6 @@ class EnsembleLda(SaveLoad):
                 self.num_models += num_new_models
 
         else:  # memory unfriendly ensembles
-            ttda = []
-
             # 1. ttda array
             if isinstance(target.dtype.type(), (np.number, float)):
                 raise ValueError(
@@ -1359,7 +1367,7 @@ class CBDBSCAN:
                     topic_clustering_results[topic_index].label = current_label
 
         # elements are going to be removed from that array in scan_topic, do until it is empty
-        while len(ordered_min_similarity) != 0:
+        while ordered_min_similarity:
             next_topic_index = ordered_min_similarity.pop(0)
             scan_topic(next_topic_index)
 

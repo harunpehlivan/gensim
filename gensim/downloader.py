@@ -126,7 +126,6 @@ def _progress(chunks_downloaded, chunk_size, total_size, part=1, total_parts=1):
                 round(size_downloaded / (1024 * 1024), 1),
                 round(float(total_size) / (1024 * 1024), 1))
         )
-        sys.stdout.flush()
     else:
         sys.stdout.write(
             '\r Part %s/%s [%s] %s%s %s/%sMB downloaded' % (
@@ -134,7 +133,8 @@ def _progress(chunks_downloaded, chunk_size, total_size, part=1, total_parts=1):
                 round(size_downloaded / (1024 * 1024), 1),
                 round(float(total_size) / (1024 * 1024), 1))
         )
-        sys.stdout.flush()
+
+    sys.stdout.flush()
 
 
 def _create_base_dir():
@@ -154,14 +154,12 @@ def _create_base_dir():
         except OSError as e:
             if e.errno == errno.EEXIST:
                 raise Exception(
-                    "Not able to create folder gensim-data in {}. File gensim-data "
-                    "exists in the directory already.".format(_PARENT_DIR)
+                    f"Not able to create folder gensim-data in {_PARENT_DIR}. File gensim-data exists in the directory already."
                 )
+
             else:
                 raise Exception(
-                    "Can't create {}. Make sure you have the read/write permissions "
-                    "to the directory or you can try creating the folder manually"
-                    .format(BASE_DIR)
+                    f"Can't create {BASE_DIR}. Make sure you have the read/write permissions to the directory or you can try creating the folder manually"
                 )
 
 
@@ -271,7 +269,7 @@ def info(name=None, show_only_latest=True, name_only=False):
         corpora = information['corpora']
         models = information['models']
         if name in corpora:
-            return information['corpora'][name]
+            return corpora[name]
         elif name in models:
             return information['models'][name]
         else:
@@ -310,14 +308,13 @@ def _get_checksum(name, part=None):
     models = information['models']
     if part is None:
         if name in corpora:
-            return information['corpora'][name]["checksum"]
+            return corpora[name]["checksum"]
         elif name in models:
             return information['models'][name]["checksum"]
-    else:
-        if name in corpora:
-            return information['corpora'][name]["checksum-{}".format(part)]
-        elif name in models:
-            return information['models'][name]["checksum-{}".format(part)]
+    elif name in corpora:
+        return corpora[name][f"checksum-{part}"]
+    elif name in models:
+        return information['models'][name][f"checksum-{part}"]
 
 
 def _get_parts(name):
@@ -338,7 +335,7 @@ def _get_parts(name):
     corpora = information['corpora']
     models = information['models']
     if name in corpora:
-        return information['corpora'][name]["parts"]
+        return corpora[name]["parts"]
     elif name in models:
         return information['models'][name]["parts"]
 
@@ -359,7 +356,7 @@ def _download(name):
     """
     url_load_file = "{base}/{fname}/__init__.py".format(base=DOWNLOAD_BASE_URL, fname=name)
     data_folder_dir = os.path.join(BASE_DIR, name)
-    data_folder_dir_tmp = data_folder_dir + '_tmp'
+    data_folder_dir_tmp = f'{data_folder_dir}_tmp'
     tmp_dir = tempfile.mkdtemp()
     init_path = os.path.join(tmp_dir, "__init__.py")
     urllib.urlretrieve(url_load_file, init_path)
@@ -367,7 +364,7 @@ def _download(name):
     if total_parts > 1:
         concatenated_folder_name = "{fname}.gz".format(fname=name)
         concatenated_folder_dir = os.path.join(tmp_dir, concatenated_folder_name)
-        for part in range(0, total_parts):
+        for part in range(total_parts):
             url_data = "{base}/{fname}/{fname}.gz_0{part}".format(base=DOWNLOAD_BASE_URL, fname=name, part=part)
 
             fname = "{f}.gz_0{p}".format(f=name, p=part)
@@ -384,7 +381,7 @@ def _download(name):
                 shutil.rmtree(tmp_dir)
                 raise Exception("Checksum comparison failed, try again")
         with open(concatenated_folder_dir, 'wb') as wfp:
-            for part in range(0, total_parts):
+            for part in range(total_parts):
                 part_path = os.path.join(tmp_dir, "{fname}.gz_0{part}".format(fname=name, part=part))
                 with open(part_path, "rb") as rfp:
                     shutil.copyfileobj(rfp, wfp)
@@ -427,7 +424,7 @@ def _get_filename(name):
     corpora = information['corpora']
     models = information['models']
     if name in corpora:
-        return information['corpora'][name]["file_name"]
+        return corpora[name]["file_name"]
     elif name in models:
         return information['models'][name]["file_name"]
 
@@ -497,10 +494,9 @@ def load(name, return_path=False):
 
     if return_path:
         return path
-    else:
-        sys.path.insert(0, BASE_DIR)
-        module = __import__(name)
-        return module.load_data()
+    sys.path.insert(0, BASE_DIR)
+    module = __import__(name)
+    return module.load_data()
 
 
 if __name__ == '__main__':

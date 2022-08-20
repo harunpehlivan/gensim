@@ -460,7 +460,7 @@ class Nmf(interfaces.TransformationABC, basemodel.BaseTopicModel):
         if normalize and word_topics.sum() > 0:
             word_topics /= word_topics.sum()
 
-        for topic_id in range(0, self.num_topics):
+        for topic_id in range(self.num_topics):
             word_coef = word_topics[topic_id]
 
             if word_coef >= minimum_probability:
@@ -507,8 +507,7 @@ class Nmf(interfaces.TransformationABC, basemodel.BaseTopicModel):
         if normalize is None:
             normalize = self.normalize
         if normalize:
-            the_sum = h.sum()
-            if the_sum:
+            if the_sum := h.sum():
                 h /= the_sum
 
         return [
@@ -541,10 +540,11 @@ class Nmf(interfaces.TransformationABC, basemodel.BaseTopicModel):
     def l2_norm(self, v):
         Wt = self._W.T
 
-        l2 = 0
+        l2 = sum(
+            np.sum(np.square((doc - doc_topics.dot(Wt))))
+            for doc, doc_topics in zip(v.T, self._h.T)
+        )
 
-        for doc, doc_topics in zip(v.T, self._h.T):
-            l2 += np.sum(np.square((doc - doc_topics.dot(Wt))))
 
         return np.sqrt(l2)
 
@@ -764,7 +764,7 @@ class Nmf(interfaces.TransformationABC, basemodel.BaseTopicModel):
 
         h_error = None
 
-        for iter_number in range(self._h_max_iter):
+        for _ in range(self._h_max_iter):
             logger.debug("h_error: %s", h_error)
 
             Wtv = self._dense_dot_csc(Wt, v)

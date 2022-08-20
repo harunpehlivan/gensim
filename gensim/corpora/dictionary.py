@@ -248,11 +248,11 @@ class Dictionary(utils.SaveLoad, Mapping):
         token2id = self.token2id
         if allow_update or return_missing:
             missing = sorted(x for x in counter.items() if x[0] not in token2id)
-            if allow_update:
-                for w, _ in missing:
-                    # new id = number of ids made so far;
-                    # NOTE this assumes there are no gaps in the id sequence!
-                    token2id[w] = len(token2id)
+        if allow_update:
+            for w, _ in missing:
+                # new id = number of ids made so far;
+                # NOTE this assumes there are no gaps in the id sequence!
+                token2id[w] = len(token2id)
         result = {token2id[w]: freq for w, freq in counter.items() if w in token2id}
 
         if allow_update:
@@ -266,10 +266,7 @@ class Dictionary(utils.SaveLoad, Mapping):
 
         # return tokenids, in ascending id order
         result = sorted(result.items())
-        if return_missing:
-            return result, dict(missing)
-        else:
-            return result
+        return (result, dict(missing)) if return_missing else result
 
     def doc2idx(self, document, unknown_word_index=-1):
         """Convert `document` (a list of words) into a list of indexes = list of `token_id`.
@@ -402,7 +399,7 @@ class Dictionary(utils.SaveLoad, Mapping):
 
         """
         # determine which tokens to keep
-        most_frequent_ids = (v for v in self.token2id.values())
+        most_frequent_ids = iter(self.token2id.values())
         most_frequent_ids = sorted(most_frequent_ids, key=self.dfs.get, reverse=True)
         most_frequent_ids = most_frequent_ids[:remove_n]
         # do the actual filtering, then rebuild dictionary to remove gaps in ids
@@ -625,15 +622,17 @@ class Dictionary(utils.SaveLoad, Mapping):
         """
         possible_ids = []
         for token, idx in special_token_dict.items():
-            if token in self.token2id and self.token2id[token] == idx:
-                continue
-            if token in self.token2id and self.token2id[token] != idx:
+            if token in self.token2id:
+                if self.token2id[token] == idx:
+                    continue
                 possible_ids.append(self.token2id[token])
                 del self.token2id[token]
             old_token = self[idx]
             self.token2id[token] = idx
-            self.token2id[old_token] = possible_ids.pop() if \
-                                       len(possible_ids) > 0 else len(self.token2id) - 1
+            self.token2id[old_token] = (
+                possible_ids.pop() if possible_ids else len(self.token2id) - 1
+            )
+
         self.id2token = {}  # Make sure that id2token is updated according to special tokens.
 
     @staticmethod
@@ -683,8 +682,7 @@ class Dictionary(utils.SaveLoad, Mapping):
                 try:
                     wordid, word, docfreq = line[:-1].split('\t')
                 except Exception:
-                    raise ValueError("invalid line in dictionary file %s: %s"
-                                     % (fname, line.strip()))
+                    raise ValueError(f"invalid line in dictionary file {fname}: {line.strip()}")
                 wordid = int(wordid)
                 if word in result.token2id:
                     raise KeyError('token %s is defined as ID %d and as ID %d' % (word, wordid, result.token2id[word]))
@@ -709,12 +707,12 @@ class Dictionary(utils.SaveLoad, Mapping):
             The n most common words and their counts from the most common to the least.
 
         """
-        most_common = [
+        return [
             (self[word], count)
-            for word, count
-            in sorted(self.cfs.items(), key=lambda x: (-x[1], x[0]))[:n]
+            for word, count in sorted(
+                self.cfs.items(), key=lambda x: (-x[1], x[0])
+            )[:n]
         ]
-        return most_common
 
     @staticmethod
     def from_corpus(corpus, id2word=None):
